@@ -1,11 +1,11 @@
 package main
 
 import (
-	"encoding/csv"
 	"fmt"
 	"log"
-	"os"
 	"regexp"
+
+	"example/craw-db-interior-ecommerce-site/tocsv"
 
 	"github.com/gocolly/colly"
 )
@@ -27,6 +27,10 @@ type Collection struct {
 }
 type Page struct {
 	name string
+}
+
+func (p *Page) toSlice([]interface{}) {
+
 }
 
 func getLastSubPath(url string) (string, error) {
@@ -158,19 +162,6 @@ func main() {
 	productCollector.Wait()
 	productDetailCollector.Wait()
 
-for _,item :=range pageTable{
-	log.Println(reflect.ValueOf(item), reflect.TypeOf(item))
-	}
-}
+	tocsv.WriteCsv(tocsv.ObjSlice2SliceSlice(pageTable), "pages")
 
-// pageCSVdata=convertToCSVformat(pageTable)
-
-// 	csvPageFile, err := os.Create("Page.csv")
-// 	csvwriter := csv.NewWriter(csvPageFile)
-
-// 	for _, dataRow := range pageTable {
-// 		_ = csvwriter.Write(dataRow)
-// 	}
-// 	defer csvPageFile.Close()
-// 	defer csvwriter.Flush()
 }
