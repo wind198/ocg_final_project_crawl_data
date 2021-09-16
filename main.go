@@ -18,16 +18,13 @@ type Product struct {
 type CollectionCategory struct {
 	name       string
 	collection string
-	link       string
 }
 type Collection struct {
 	name string
 	page string
-	link string
 }
 type Page struct {
 	name string
-	link string
 }
 
 func getLastSubPath(url string) (string, error) {
@@ -36,7 +33,7 @@ func getLastSubPath(url string) (string, error) {
 	if m != nil {
 		return m[len(m)-1], nil
 	} else {
-		return "", fmt.Errorf("Invalid url")
+		return "", fmt.Errorf("INVALID URL")
 	}
 }
 
@@ -46,10 +43,6 @@ const (
 	collectionLinkTemplate         = pageLinkTemplate + "/collections/%v"
 	collectionCategoryLinkTemplate = collectionLinkTemplate + "/category-%v"
 )
-
-var pageChann = make(chan *Page)
-var collectionChann = make(chan *Collection)
-var collectionCategoryChann = make(chan *CollectionCategory)
 
 var pageTable = make([]*Page, 0)
 var collectionTable = make([]*Collection, 0)
@@ -72,14 +65,14 @@ func main() {
 				} else {
 					newPage := Page{
 						name: name,
-						link: pageLink,
 					}
-					pageChann <- &newPage
 					pageTable = append(pageTable, &newPage)
+					newContext := colly.NewContext()
+					newContext.Put("owner", name)
+					collectionCollector.Request("GET", pageLink, nil, newContext, nil)
 				}
 			}
 		})
-		close(pageChann)
 
 	})
 	collectionCollector.OnHTML("body", func(h *colly.HTMLElement) {
@@ -91,34 +84,30 @@ func main() {
 			} else {
 				newCollection := Collection{
 					name: name,
-					link: collectionLink,
 					page: h1.Request.Ctx.Get("owner"),
 				}
-				collectionChann <- &newCollection
 				collectionTable = append(collectionTable, &newCollection)
+				newContext := colly.NewContext()
+				newContext.Put("owner", name)
+				collectionCategoryCollector.Request("GET", collectionLink, nil, newContext, nil)
 			}
 		})
-		close(collectionChann)
 
 	})
 	collectionCategoryCollector.OnHTML("select.styled-select.coll-filter.drop-a", func(h *colly.HTMLElement) {
 		h.ForEach("option", func(i int, h1 *colly.HTMLElement) {
-			collectionCategoryLink := h1.Request.AbsoluteURL(h1.Attr("value"))
-			name, err := getLastSubPath(h1.Request.AbsoluteURL(collectionCategoryLink))
-			if err != nil {
-				log.Printf("%q is invalid url", collectionCategoryLink)
-			} else {
-				newCollectionCategory := CollectionCategory{
-					name:       name,
-					link:       collectionCategoryLink,
-					collection: h1.Request.Ctx.Get("owner"),
-				}
-				collectionCategoryChann <- &newCollectionCategory
-				collectionCategoryTable = append(collectionCategoryTable, &newCollectionCategory)
+			name := h1.Attr("value")
+			collectionCategoryLink := h1.Request.AbsoluteURL(name)
+			newCollectionCategory := CollectionCategory{
+				name:       name,
+				collection: h1.Request.Ctx.Get("owner"),
 			}
+			collectionCategoryTable = append(collectionCategoryTable, &newCollectionCategory)
+			newContext := colly.NewContext()
+			newContext.Put("owner", name)
+			productCollector.Request("GET", collectionCategoryLink, nil, newContext, nil)
 
 		})
-		close(collectionCategoryChann)
 
 	})
 	productCollector.OnHTML(".prod-image", func(h *colly.HTMLElement) {
@@ -145,25 +134,14 @@ func main() {
 	})
 	pageCollector.OnRequest(func(r *colly.Request) { log.Printf("Visiting %q", r.URL) })
 	collectionCollector.OnRequest(func(r *colly.Request) { log.Printf("Visiting %q", r.URL) })
+	collectionCategoryCollector.OnRequest(func(r *colly.Request) { log.Printf("Visiting %q", r.URL) })
+	productCollector.OnRequest(func(r *colly.Request) { log.Printf("Visiting %q", r.URL) })
+	productDetailCollector.OnRequest(func(r *colly.Request) { log.Printf("Visiting %q", r.URL) })
 	pageCollector.Visit(homePage)
-
-	for page := range pageChann {
-		linkToVisit := fmt.Sprintf(pageLinkTemplate, page.name)
-		ctx := colly.NewContext()
-		ctx.Put("owner", page.name)
-		collectionCollector.Request("GET", linkToVisit, nil, ctx, nil)
-	}
-	for collection := range collectionChann {
-		linkToVisit := collection.link
-		ctx := colly.NewContext()
-		ctx.Put("owner", collection.name)
-		collectionCategoryCollector.Request("GET", linkToVisit, nil, ctx, nil)
-	}
-	for collectionCategory := range collectionCategoryChann {
-		linkToVisit := collectionCategory.link
-		ctx := colly.NewContext()
-		ctx.Put("owner", collectionCategory.name)
-		productCollector.Request("GET", linkToVisit, nil, ctx, nil)
-	}
+	pageCollector.Wait()
+	collectionCollector.Wait()
+	collectionCategoryCollector.Wait()
+	productCollector.Wait()
+	productDetailCollector.Wait()
 
 }
