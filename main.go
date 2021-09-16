@@ -1,8 +1,10 @@
 package main
 
 import (
+	"encoding/csv"
 	"fmt"
 	"log"
+	"os"
 	"regexp"
 
 	"github.com/gocolly/colly"
@@ -10,8 +12,8 @@ import (
 
 type Product struct {
 	name               string
-	description        []string
-	featureList        []string
+	description        string
+	featureList        string
 	collectionCategory string
 }
 
@@ -44,10 +46,18 @@ const (
 	collectionCategoryLinkTemplate = collectionLinkTemplate + "/category-%v"
 )
 
-var pageTable = make([]*Page, 0)
-var collectionTable = make([]*Collection, 0)
-var collectionCategoryTable = make([]*CollectionCategory, 0)
-var productTable = make([]*Product, 0)
+var (
+	pageTable               = make([]*Page, 0)
+	collectionTable         = make([]*Collection, 0)
+	collectionCategoryTable = make([]*CollectionCategory, 0)
+	productTable            = make([]*Product, 0)
+)
+var (
+	productCSVdata            = make([][]string, 0)
+	collectioinCSVdata        = make([][]string, 0)
+	collectionCategoryCSVdata = make([][]string, 0)
+	pageCSVdata               = make([][]string, 0)
+)
 
 func main() {
 	pageCollector := colly.NewCollector(colly.Async(true))
@@ -55,6 +65,7 @@ func main() {
 	collectionCategoryCollector := colly.NewCollector(colly.Async(true))
 	productCollector := colly.NewCollector(colly.Async(true))
 	productDetailCollector := colly.NewCollector(colly.Async(true))
+
 	pageCollector.OnHTML("ul#main-nav", func(h1 *colly.HTMLElement) {
 		h1.ForEach("li.dropdown >a", func(i int, h2 *colly.HTMLElement) {
 			if i < 4 {
@@ -97,16 +108,17 @@ func main() {
 	collectionCategoryCollector.OnHTML("select.styled-select.coll-filter.drop-a", func(h *colly.HTMLElement) {
 		h.ForEach("option", func(i int, h1 *colly.HTMLElement) {
 			name := h1.Attr("value")
-			collectionCategoryLink := h1.Request.AbsoluteURL(name)
-			newCollectionCategory := CollectionCategory{
-				name:       name,
-				collection: h1.Request.Ctx.Get("owner"),
+			if name != "" {
+				collectionCategoryLink := h.Request.URL.String() + "/" + name
+				newCollectionCategory := CollectionCategory{
+					name:       name,
+					collection: h1.Request.Ctx.Get("owner"),
+				}
+				collectionCategoryTable = append(collectionCategoryTable, &newCollectionCategory)
+				newContext := colly.NewContext()
+				newContext.Put("owner", name)
+				productCollector.Request("GET", collectionCategoryLink, nil, newContext, nil)
 			}
-			collectionCategoryTable = append(collectionCategoryTable, &newCollectionCategory)
-			newContext := colly.NewContext()
-			newContext.Put("owner", name)
-			productCollector.Request("GET", collectionCategoryLink, nil, newContext, nil)
-
 		})
 
 	})
@@ -122,21 +134,23 @@ func main() {
 	productDetailCollector.OnHTML("body", func(h *colly.HTMLElement) {
 		newProduct := Product{
 			collectionCategory: h.Request.Ctx.Get("owner"),
+			description:        "",
+			featureList:        "",
 		}
 		newProduct.name = h.ChildText("h1")
-		h.ForEach(".lower-description1>p", func(i int, h1 *colly.HTMLElement) {
-			newProduct.description = append(newProduct.description, h1.Text)
+		h.ForEach("#lower-description1>p", func(i int, h1 *colly.HTMLElement) {
+			newProduct.description += "||" + h1.Text
 		})
-		h.ForEach(".lower-description1>ul>li", func(i int, h2 *colly.HTMLElement) {
-			newProduct.featureList = append(newProduct.featureList, h2.Text)
+		h.ForEach("#lower-description1>ul>li", func(i int, h2 *colly.HTMLElement) {
+			newProduct.featureList += "||" + h2.Text
 		})
 		productTable = append(productTable, &newProduct)
 	})
-	pageCollector.OnRequest(func(r *colly.Request) { log.Printf("Visiting %q", r.URL) })
-	collectionCollector.OnRequest(func(r *colly.Request) { log.Printf("Visiting %q", r.URL) })
-	collectionCategoryCollector.OnRequest(func(r *colly.Request) { log.Printf("Visiting %q", r.URL) })
-	productCollector.OnRequest(func(r *colly.Request) { log.Printf("Visiting %q", r.URL) })
-	productDetailCollector.OnRequest(func(r *colly.Request) { log.Printf("Visiting %q", r.URL) })
+	// pageCollector.OnRequest(func(r *colly.Request) { log.Printf("Visiting %q", r.URL) })
+	// collectionCollector.OnRequest(func(r *colly.Request) { log.Printf("Visiting %q", r.URL) })
+	// collectionCategoryCollector.OnRequest(func(r *colly.Request) { log.Printf("Visiting %q", r.URL) })
+	// productCollector.OnRequest(func(r *colly.Request) { log.Printf("Visiting %q", r.URL) })
+	// productDetailCollector.OnRequest(func(r *colly.Request) { log.Printf("Visiting %q", r.URL) })
 	pageCollector.Visit(homePage)
 	pageCollector.Wait()
 	collectionCollector.Wait()
@@ -144,4 +158,19 @@ func main() {
 	productCollector.Wait()
 	productDetailCollector.Wait()
 
+for _,item :=range pageTable{
+	log.Println(reflect.ValueOf(item), reflect.TypeOf(item))
+	}
+}
+
+// pageCSVdata=convertToCSVformat(pageTable)
+
+// 	csvPageFile, err := os.Create("Page.csv")
+// 	csvwriter := csv.NewWriter(csvPageFile)
+
+// 	for _, dataRow := range pageTable {
+// 		_ = csvwriter.Write(dataRow)
+// 	}
+// 	defer csvPageFile.Close()
+// 	defer csvwriter.Flush()
 }
