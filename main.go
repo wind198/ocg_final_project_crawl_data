@@ -16,17 +16,19 @@ type Product struct {
 	Description        string
 	FeatureList        string
 	Price              float64
+	Image              string
 	CollectionCategory string
 	Collection         string
 }
 
-type CollectionCategory struct {
+type Category struct {
 	Name       string
 	Collection string
 }
 type Collection struct {
-	Name string
-	Page string
+	Name  string
+	Page  string
+	Image string
 }
 type Page struct {
 	Name string
@@ -51,22 +53,16 @@ const (
 
 var validPriceString = regexp.MustCompile(`\$(\d+),?(\d*\.\d+)`)
 var (
-	pageTable               = make([]*Page, 0)
-	collectionTable         = make([]*Collection, 0)
-	collectionCategoryTable = make([]*CollectionCategory, 0)
-	productTable            = make([]*Product, 0)
-)
-var (
-	productCSVdata            = make([][]string, 0)
-	collectioinCSVdata        = make([][]string, 0)
-	collectionCategoryCSVdata = make([][]string, 0)
-	pageCSVdata               = make([][]string, 0)
+	pageTable       = make([]*Page, 0)
+	collectionTable = make([]*Collection, 0)
+	categoryTable   = make([]*Category, 0)
+	productTable    = make([]*Product, 0)
 )
 
 func main() {
 	pageCollector := colly.NewCollector(colly.Async(true))
 	collectionCollector := colly.NewCollector(colly.Async(true))
-	collectionCategoryCollector := colly.NewCollector(colly.Async(true))
+	categoryCollector := colly.NewCollector(colly.Async(true))
 	productCollector := colly.NewCollector(colly.Async(true))
 	productDetailCollector := colly.NewCollector(colly.Async(true))
 
@@ -94,36 +90,37 @@ func main() {
 
 	})
 	collectionCollector.OnHTML("body", func(h *colly.HTMLElement) {
-		h.ForEach("div.collection-info-inner > a", func(i int, h1 *colly.HTMLElement) {
-			collectionLink := h1.Request.AbsoluteURL(h1.Attr("href"))
+		h.ForEach("div.collection-image", func(i int, h1 *colly.HTMLElement) {
+			collectionLink := h1.Request.AbsoluteURL(h1.ChildAttr("a", "href"))
 			name, err := getLastSubPath(h1.Request.AbsoluteURL(collectionLink))
 			if err != nil {
 				log.Printf("%q is invalid url", collectionLink)
 			} else {
 				newCollection := Collection{
-					Name: name,
-					Page: h1.Request.Ctx.Get("page"),
+					Name:  name,
+					Page:  h1.Request.Ctx.Get("page"),
+					Image: h1.ChildAttr("img", "src"),
 				}
 				collectionTable = append(collectionTable, &newCollection)
 				newContext := colly.NewContext()
 				newContext.Put("collection", name)
-				collectionCategoryCollector.Request("GET", collectionLink, nil, newContext, nil)
+				categoryCollector.Request("GET", collectionLink, nil, newContext, nil)
 			}
 		})
 
 	})
-	collectionCategoryCollector.OnHTML("select.styled-select.coll-filter.drop-a", func(h *colly.HTMLElement) {
+	categoryCollector.OnHTML("select.styled-select.coll-filter.drop-a", func(h *colly.HTMLElement) {
 		h.ForEach("option", func(i int, h1 *colly.HTMLElement) {
 			name := h1.Attr("value")
 			if name != "" {
 				collectionCategoryLink := h.Request.URL.String() + "/" + name
-				newCollectionCategory := CollectionCategory{
+				newCategory := Category{
 					Name:       name,
 					Collection: h1.Request.Ctx.Get("collection"),
 				}
-				collectionCategoryTable = append(collectionCategoryTable, &newCollectionCategory)
+				categoryTable = append(categoryTable, &newCategory)
 				newContext := colly.NewContext()
-				newContext.Put("collectionCategory", name)
+				newContext.Put("category", name)
 				newContext.Put("collection", h1.Request.Ctx.Get("collection"))
 				productCollector.Request("GET", collectionCategoryLink, nil, newContext, nil)
 			}
@@ -133,17 +130,20 @@ func main() {
 	productCollector.OnHTML(".prod-image", func(h *colly.HTMLElement) {
 		h.ForEach("a", func(i int, h1 *colly.HTMLElement) {
 			productLink := h1.Request.AbsoluteURL(h1.Attr("href"))
+			productImage := h1.ChildAttr("a>img", "src")
 			newContext := colly.NewContext()
-			newContext.Put("collectionCategory", h1.Request.Ctx.Get("collectionCategory"))
+			newContext.Put("category", h1.Request.Ctx.Get("category"))
 			newContext.Put("collection", h1.Request.Ctx.Get("collection"))
+			newContext.Put("image", productImage)
 			productDetailCollector.Request("GET", productLink, nil, newContext, nil)
 		})
 
 	})
 	productDetailCollector.OnHTML("body", func(h *colly.HTMLElement) {
 		newProduct := Product{
-			CollectionCategory: h.Request.Ctx.Get("collectionCategory"),
+			CollectionCategory: h.Request.Ctx.Get("category"),
 			Collection:         h.Request.Ctx.Get("collection"),
+			Image:              h.Request.Ctx.Get("image"),
 			Description:        "",
 			FeatureList:        "",
 		}
@@ -172,19 +172,19 @@ func main() {
 	})
 	pageCollector.OnRequest(func(r *colly.Request) { log.Printf("Visiting %q", r.URL) })
 	collectionCollector.OnRequest(func(r *colly.Request) { log.Printf("Visiting %q", r.URL) })
-	collectionCategoryCollector.OnRequest(func(r *colly.Request) { log.Printf("Visiting %q", r.URL) })
+	categoryCollector.OnRequest(func(r *colly.Request) { log.Printf("Visiting %q", r.URL) })
 	productCollector.OnRequest(func(r *colly.Request) { log.Printf("Visiting %q", r.URL) })
 	productDetailCollector.OnRequest(func(r *colly.Request) { log.Printf("Visiting %q", r.URL) })
 	pageCollector.Visit(homePage)
 	pageCollector.Wait()
 	collectionCollector.Wait()
-	collectionCategoryCollector.Wait()
+	categoryCollector.Wait()
 	productCollector.Wait()
 	productDetailCollector.Wait()
 
 	tocsv.WriteCsv(tocsv.ObjSlice2SliceSlice(pageTable), "page.csv")
 	tocsv.WriteCsv(tocsv.ObjSlice2SliceSlice(collectionTable), "collection.csv")
-	tocsv.WriteCsv(tocsv.ObjSlice2SliceSlice(collectionCategoryTable), "collectionCategory.csv")
+	tocsv.WriteCsv(tocsv.ObjSlice2SliceSlice(categoryTable), "category.csv")
 	tocsv.WriteCsv(tocsv.ObjSlice2SliceSlice(productTable), "product.csv")
 
 }
