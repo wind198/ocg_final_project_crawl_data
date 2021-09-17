@@ -1,6 +1,6 @@
-module example/craw-db-interior-ecommerce-site
+module example.com/crawler
 
-replace example/craw-db-interior-ecommerce-site => ./
+replace example.com/crawler/tocsv => ../tocsv
 
 go 1.17
 

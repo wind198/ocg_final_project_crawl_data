@@ -4,33 +4,32 @@ import (
 	"fmt"
 	"log"
 	"regexp"
+	"strconv"
+	"strings"
 
-	"example/craw-db-interior-ecommerce-site/tocsv"
-
+	"example.com/crawler/tocsv"
 	"github.com/gocolly/colly"
 )
 
 type Product struct {
-	name               string
-	description        string
-	featureList        string
-	collectionCategory string
+	Name               string
+	Description        string
+	FeatureList        string
+	Price              float64
+	CollectionCategory string
+	Collection         string
 }
 
 type CollectionCategory struct {
-	name       string
-	collection string
+	Name       string
+	Collection string
 }
 type Collection struct {
-	name string
-	page string
+	Name string
+	Page string
 }
 type Page struct {
-	name string
-}
-
-func (p *Page) toSlice([]interface{}) {
-
+	Name string
 }
 
 func getLastSubPath(url string) (string, error) {
@@ -50,6 +49,7 @@ const (
 	collectionCategoryLinkTemplate = collectionLinkTemplate + "/category-%v"
 )
 
+var validPriceString = regexp.MustCompile(`\$(\d+),?(\d*\.\d+)`)
 var (
 	pageTable               = make([]*Page, 0)
 	collectionTable         = make([]*Collection, 0)
@@ -71,19 +71,22 @@ func main() {
 	productDetailCollector := colly.NewCollector(colly.Async(true))
 
 	pageCollector.OnHTML("ul#main-nav", func(h1 *colly.HTMLElement) {
+		log.Println("found you")
 		h1.ForEach("li.dropdown >a", func(i int, h2 *colly.HTMLElement) {
 			if i < 4 {
 				pageLink := h2.Request.AbsoluteURL(h2.Attr("href"))
 				name, err := getLastSubPath(h2.Request.AbsoluteURL(pageLink))
+				log.Println(pageLink)
 				if err != nil {
 					log.Printf("%q is invalid url", pageLink)
 				} else {
+					log.Println("found new page")
 					newPage := Page{
-						name: name,
+						Name: name,
 					}
 					pageTable = append(pageTable, &newPage)
 					newContext := colly.NewContext()
-					newContext.Put("owner", name)
+					newContext.Put("page", name)
 					collectionCollector.Request("GET", pageLink, nil, newContext, nil)
 				}
 			}
@@ -98,12 +101,12 @@ func main() {
 				log.Printf("%q is invalid url", collectionLink)
 			} else {
 				newCollection := Collection{
-					name: name,
-					page: h1.Request.Ctx.Get("owner"),
+					Name: name,
+					Page: h1.Request.Ctx.Get("page"),
 				}
 				collectionTable = append(collectionTable, &newCollection)
 				newContext := colly.NewContext()
-				newContext.Put("owner", name)
+				newContext.Put("collection", name)
 				collectionCategoryCollector.Request("GET", collectionLink, nil, newContext, nil)
 			}
 		})
@@ -115,12 +118,13 @@ func main() {
 			if name != "" {
 				collectionCategoryLink := h.Request.URL.String() + "/" + name
 				newCollectionCategory := CollectionCategory{
-					name:       name,
-					collection: h1.Request.Ctx.Get("owner"),
+					Name:       name,
+					Collection: h1.Request.Ctx.Get("collection"),
 				}
 				collectionCategoryTable = append(collectionCategoryTable, &newCollectionCategory)
 				newContext := colly.NewContext()
-				newContext.Put("owner", name)
+				newContext.Put("collectionCategory", name)
+				newContext.Put("collection", h1.Request.Ctx.Get("collection"))
 				productCollector.Request("GET", collectionCategoryLink, nil, newContext, nil)
 			}
 		})
@@ -130,31 +134,47 @@ func main() {
 		h.ForEach("a", func(i int, h1 *colly.HTMLElement) {
 			productLink := h1.Request.AbsoluteURL(h1.Attr("href"))
 			newContext := colly.NewContext()
-			newContext.Put("owner", h1.Request.Ctx.Get("owner"))
+			newContext.Put("collectionCategory", h1.Request.Ctx.Get("collectionCategory"))
+			newContext.Put("collection", h1.Request.Ctx.Get("collection"))
 			productDetailCollector.Request("GET", productLink, nil, newContext, nil)
 		})
 
 	})
 	productDetailCollector.OnHTML("body", func(h *colly.HTMLElement) {
 		newProduct := Product{
-			collectionCategory: h.Request.Ctx.Get("owner"),
-			description:        "",
-			featureList:        "",
+			CollectionCategory: h.Request.Ctx.Get("collectionCategory"),
+			Collection:         h.Request.Ctx.Get("collection"),
+			Description:        "",
+			FeatureList:        "",
 		}
-		newProduct.name = h.ChildText("h1")
+		newProduct.Name = h.ChildText("h1")
+		priceString := h.ChildText("span.product-price")
+		var price float64
+		var err error
+		m := validPriceString.FindStringSubmatch(priceString)
+		log.Println(m)
+		if m != nil {
+			price, err = strconv.ParseFloat(strings.Join(m[1:], ""), 64)
+			if err != nil {
+				log.Println("err extracting price", err)
+			}
+		}
+		log.Println(price)
+
+		newProduct.Price = price
 		h.ForEach("#lower-description1>p", func(i int, h1 *colly.HTMLElement) {
-			newProduct.description += "||" + h1.Text
+			newProduct.Description += "||" + h1.Text
 		})
 		h.ForEach("#lower-description1>ul>li", func(i int, h2 *colly.HTMLElement) {
-			newProduct.featureList += "||" + h2.Text
+			newProduct.FeatureList += "||" + h2.Text
 		})
 		productTable = append(productTable, &newProduct)
 	})
-	// pageCollector.OnRequest(func(r *colly.Request) { log.Printf("Visiting %q", r.URL) })
-	// collectionCollector.OnRequest(func(r *colly.Request) { log.Printf("Visiting %q", r.URL) })
-	// collectionCategoryCollector.OnRequest(func(r *colly.Request) { log.Printf("Visiting %q", r.URL) })
-	// productCollector.OnRequest(func(r *colly.Request) { log.Printf("Visiting %q", r.URL) })
-	// productDetailCollector.OnRequest(func(r *colly.Request) { log.Printf("Visiting %q", r.URL) })
+	pageCollector.OnRequest(func(r *colly.Request) { log.Printf("Visiting %q", r.URL) })
+	collectionCollector.OnRequest(func(r *colly.Request) { log.Printf("Visiting %q", r.URL) })
+	collectionCategoryCollector.OnRequest(func(r *colly.Request) { log.Printf("Visiting %q", r.URL) })
+	productCollector.OnRequest(func(r *colly.Request) { log.Printf("Visiting %q", r.URL) })
+	productDetailCollector.OnRequest(func(r *colly.Request) { log.Printf("Visiting %q", r.URL) })
 	pageCollector.Visit(homePage)
 	pageCollector.Wait()
 	collectionCollector.Wait()
@@ -162,6 +182,9 @@ func main() {
 	productCollector.Wait()
 	productDetailCollector.Wait()
 
-	tocsv.WriteCsv(tocsv.ObjSlice2SliceSlice(pageTable), "pages")
+	tocsv.WriteCsv(tocsv.ObjSlice2SliceSlice(pageTable), "page.csv")
+	tocsv.WriteCsv(tocsv.ObjSlice2SliceSlice(collectionTable), "collection.csv")
+	tocsv.WriteCsv(tocsv.ObjSlice2SliceSlice(collectionCategoryTable), "collectionCategory.csv")
+	tocsv.WriteCsv(tocsv.ObjSlice2SliceSlice(productTable), "product.csv")
 
 }
